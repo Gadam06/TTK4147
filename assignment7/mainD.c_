@@ -1,0 +1,132 @@
+
+#include "io.h"
+#include <pthread.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+#include <assert.h>
+#include <sys/times.h>
+#include <unistd.h>
+#include <sched.h>
+#include <sys/mman.h>
+#include <native/task.h>
+#include <native/timer.h>
+#include <native/sem.h>
+#include <native/mutex.h>
+#include  <rtdk.h>
+
+void print_pri(RT_TASK *task, char *s)
+{
+	struct rt_task_info temp;
+	rt_task_inquire(task, &temp);
+	rt_printf("b:%i c:%i ", temp.bprio, temp.cprio);
+	rt_printf(s);
+}
+int rt_task_sleep_ms(unsigned long delay){
+	return rt_task_sleep(1000*1000*delay);
+}
+void busy_wait_ms(unsigned long delay){
+	unsigned long count = 0;
+	while (count <= delay*10){
+		rt_timer_spin(1000*100);
+		count++;
+	}
+}
+
+int set_cpu(int cpu_number){
+	//setting cpu set to the selected cpu
+	cpu_set_t cpu;
+	CPU_ZERO(&cpu);
+	CPU_SET(cpu_number, &cpu);
+
+	//set cpu to current thread and return
+	return pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpu);
+}
+
+RT_MUTEX muxA, muxB;
+RT_TASK task_1, task_2;
+
+void fun_1( void* pp )
+{
+	set_cpu(1);
+
+	rt_mutex_acquire( &muxA, TM_INFINITE );
+	print_pri( &task_1, "fun_1 takes A\n");
+
+	rt_task_set_priority( &task_1, 61 );
+
+	busy_wait_ms( 300 );
+
+	rt_mutex_acquire( &muxB, TM_INFINITE );
+	print_pri( &task_1, "fun_1 takes B\n");
+
+	busy_wait_ms( 300 );
+
+	print_pri( &task_1, "fun_1 gives B\n");
+	rt_mutex_release( &muxB );
+
+	print_pri( &task_1, "fun_1 gives A\n");
+	rt_mutex_release( &muxA );
+
+	rt_task_set_priority( &task_1, 50 );
+	rt_task_sleep( 1 );
+
+	busy_wait_ms( 100 );
+
+	print_pri( &task_2, "fun_1 ends\n");
+}
+
+void fun_2( void* pp )
+{
+	set_cpu(1);
+
+	rt_task_sleep_ms( 100 );
+
+	rt_mutex_acquire( &muxB, TM_INFINITE );
+	print_pri( &task_2, "fun_2 takes B\n");
+
+	busy_wait_ms( 100 );
+
+	rt_mutex_acquire( &muxA, TM_INFINITE );
+	print_pri( &task_2, "fun_2 takes A\n");
+
+	busy_wait_ms( 200 );
+
+	print_pri( &task_2, "fun_2 gives A\n");
+	rt_mutex_release( &muxA );
+
+	print_pri( &task_2, "fun_2 gives B\n");
+	rt_mutex_release( &muxB );
+
+	busy_wait_ms( 100 );
+
+	print_pri( &task_2, "fun_2 ends\n");
+}
+
+int main(){
+
+	mlockall( MCL_CURRENT | MCL_FUTURE );
+
+	rt_print_auto_init(1);
+
+	rt_mutex_create( &muxA, "mutex A" );
+	rt_mutex_create( &muxB, "mutex B" );
+
+	assert( !rt_task_create( &task_1, "task 1", 0, 50, T_JOINABLE ) );
+	assert( !rt_task_create( &task_2, "task 2", 0, 60, T_JOINABLE ) );
+
+	rt_task_shadow(NULL, "Main", 99, T_JOINABLE);
+
+	assert( !rt_task_start( &task_2, fun_2, NULL ) );
+	assert( !rt_task_start( &task_1, fun_1, NULL ) );
+	
+	rt_task_join(&task_1);
+	rt_task_join(&task_2);
+
+	rt_mutex_delete( &muxA );
+	rt_mutex_delete( &muxB );
+
+	printf( "end\n" );
+
+	return 0;
+}

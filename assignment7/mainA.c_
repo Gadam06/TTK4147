@@ -1,0 +1,64 @@
+
+#include "io.h"
+#include <pthread.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+#include <assert.h>
+#include <sys/times.h>
+#include <unistd.h>
+#include <sched.h>
+#include <sys/mman.h>
+#include <native/task.h>
+#include <native/timer.h>
+#include <native/sem.h>
+#include  <rtdk.h>
+
+RT_SEM sem;
+
+void fun_1( void* pp )
+{
+	rt_sem_p( &sem, TM_INFINITE );
+	rt_printf("fun_1\n");
+}
+
+void fun_2( void* pp )
+{
+	rt_sem_p( &sem, TM_INFINITE );
+	rt_printf("fun_2\n");
+}
+
+void fun_3( void* pp )
+{
+	rt_task_sleep( 100 );
+	rt_sem_broadcast( &sem );
+	rt_task_sleep( 100 );
+	rt_sem_delete( &sem );
+}
+
+int main(){
+
+	mlockall( MCL_CURRENT | MCL_FUTURE );
+
+	rt_print_auto_init(1);
+
+	rt_sem_create( &sem, "sem", 0, S_FIFO );
+	
+	RT_TASK task_1, task_2, task_3;
+
+	assert( !rt_task_create( &task_1, "task 1", 0, 70, T_CPU(1)|T_JOINABLE ) );
+	assert( !rt_task_create( &task_2, "task 2", 0, 60, T_CPU(1)|T_JOINABLE ) );
+	assert( !rt_task_create( &task_3, "task 3", 0, 99, T_CPU(1)|T_JOINABLE ) );
+
+	assert( !rt_task_start( &task_1, fun_1, NULL ) );
+	assert( !rt_task_start( &task_2, fun_2, NULL ) );
+	assert( !rt_task_start( &task_3, fun_3, NULL ) );
+	
+	rt_task_join(&task_1);
+	rt_task_join(&task_2);
+	rt_task_join(&task_3);
+
+	printf( "end\n" );
+
+	return 0;
+}
