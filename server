@@ -1,0 +1,40 @@
+#include <stdlib.h>
+#include <stdio.h>
+#include <unistd.h>
+#include <errno.h>
+#include <string.h>
+#include <fcntl.h>
+#include <sys/dispatch.h>
+#include <sys/mman.h>
+
+//SERVER
+
+typedef struct {
+	pthread_mutex_t pid_mutex;
+	pid_t pid;
+} pid_data;
+
+int main( int argc, char *argv[] )
+{
+	int shmem;
+	pid_data* ptr;
+	pthread_mutexattr_t myattr;
+	char s[8];
+
+	shmem = shm_open( "/dev/shmem/sharedpid", O_RDWR | O_CREAT, S_IRWXU );
+	ftruncate( shmem, sizeof(pid_data) );
+	ptr = mmap( 0, sizeof(pid_data), PROT_READ|PROT_WRITE, MAP_SHARED, shmem, 0 );
+
+	pthread_mutexattr_init(&myattr);
+    pthread_mutexattr_setpshared(&myattr, PTHREAD_PROCESS_SHARED);
+    pthread_mutex_init(&ptr->pid_mutex, &myattr );
+
+    ptr->pid = getpid();
+
+    int chid = ChannelCreate( 0 );
+    int msgid = MsgReceive( chid, s, 8, NULL );
+    s[0] = s[1];
+    MsgReply( msgid, EOK, s, 8 );
+
+	return EXIT_SUCCESS;
+}
