@@ -1,0 +1,46 @@
+#include <stdlib.h>
+#include <stdio.h>
+#include <unistd.h>
+#include <errno.h>
+#include <string.h>
+#include <fcntl.h>
+#include <sys/dispatch.h>
+#include <sys/mman.h>
+#include <assert.h>
+
+//CLIENT
+
+typedef struct {
+	pthread_mutex_t pid_mutex;
+	pid_t pid;
+} pid_data;
+
+pid_data* ptr;
+
+pid_t getpid()
+{
+	return ptr->pid;
+}
+
+int main( int argc, char *argv[] )
+{
+	int shmem;
+	char s[8];
+	char sReceive[8];
+
+	shmem = shm_open( "/dev/shmem/sharedpid", O_RDWR, S_IRWXU );
+	ptr = mmap( 0, sizeof(pid_data), PROT_READ, MAP_SHARED, shmem, 0 );
+
+	printf( "pid : %d\n", ptr->pid);
+
+	sprintf( s, "hello" );
+
+	int chid = ConnectAttach( 0, ptr->pid, 1, 0, 0 );
+	assert( MsgSend( chid, s, 8, sReceive, 8 ) == EOK );
+
+	printf( "send:%s\nreceived:%s\n", s, sReceive );
+
+	ConnectDetach( chid );
+
+	return EXIT_SUCCESS;
+}
